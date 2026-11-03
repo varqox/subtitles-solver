@@ -345,7 +345,8 @@ fn max_match_in(domain: &RectDomain, from: &Range, to: &Range) -> f64 {
 //     dp[from.len() - 1]
 // }
 
-fn max_score_in(
+#[allow(unused)]
+fn max_score_in_general_optimized_double_lcs(
     domain: &RectDomain,
     from: &[Range],
     to: &[Range],
@@ -391,6 +392,81 @@ fn max_score_in(
     }
 }
 
+fn max_score_in_specialized_double_lcs(
+    domain: &RectDomain,
+    from: &[Range],
+    to: &[Range],
+    max_score_upper_bound: Option<f64>,
+) -> f64 {
+    if from.is_empty() || to.is_empty() {
+        return 0.;
+    }
+    let (l, r) = if to.len() < from.len() {
+        (0, from.len() - to.len())
+    } else {
+        (to.len() - from.len(), 0)
+    };
+    let min_len = min(from.len(), to.len());
+    let mut k = max(
+        min_len - max_score_upper_bound.unwrap_or(min_len as f64).min(min_len as f64) as usize,
+        (l + r) / 3,
+    ) * 4
+        / 3
+        + 2;
+    let mut dp = vec![0_f64; from.len() + 1];
+    loop {
+        dp.fill(0.);
+        let mut non_zero_score_beg = 0;
+        let mut non_zero_score_end = 0;
+        let mut explored_more = false;
+        for (j, elem) in to.iter().enumerate() {
+            while non_zero_score_beg < from.len() {
+                let f = &from[non_zero_score_beg];
+                let end = f.end * domain.stretch.end + domain.shift.end;
+                if end <= elem.beg {
+                    dp[non_zero_score_beg + 1] = dp[non_zero_score_beg + 1].max(dp[non_zero_score_beg]);
+                    non_zero_score_beg += 1;
+                } else {
+                    break;
+                }
+            }
+            non_zero_score_end = non_zero_score_end.max(non_zero_score_beg);
+            while non_zero_score_end < from.len() {
+                let f = &from[non_zero_score_end];
+                let beg = f.beg * domain.stretch.beg + domain.shift.beg;
+                if beg < elem.end {
+                    dp[non_zero_score_end + 1] = dp[non_zero_score_end + 1].max(dp[non_zero_score_end]);
+                    non_zero_score_end += 1;
+                } else {
+                    break;
+                }
+            }
+            let start = j.saturating_sub(l + k);
+            let end = min(j + r + k, from.len());
+            if non_zero_score_beg < non_zero_score_end && (start > non_zero_score_beg || end < non_zero_score_end) {
+                explored_more = true;
+            }
+            let start = start.max(non_zero_score_beg);
+            let end = end.min(non_zero_score_end);
+            let mut diag = dp[start];
+            for i in start..end {
+                let next_diag = dp[i + 1];
+                dp[i + 1] = dp[i + 1].max(dp[i]);
+                if diag + 1.0 > dp[i + 1] {
+                    dp[i + 1] = dp[i + 1].max(diag + max_match_in(domain, &from[i], elem));
+                }
+
+                diag = next_diag;
+            }
+        }
+        let score = dp[non_zero_score_end];
+        if score >= min_len.saturating_sub(k) as f64 || !explored_more {
+            return score;
+        }
+        k *= 2;
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     let args = <cli::Args as clap::Parser>::parse();
     init_logging(args.debug);
@@ -430,7 +506,7 @@ fn main() -> anyhow::Result<()> {
     dbg!(from_ranges.first());
     dbg!(to_ranges.first());
     let calc_max_bound = move |domain: &RectDomain, max_score_upper_bound: Option<f64>| {
-        max_score_in(domain, &from_ranges, &to_ranges, max_score_upper_bound)
+        max_score_in_specialized_double_lcs(domain, &from_ranges, &to_ranges, max_score_upper_bound)
     };
     let do_split = |RectDomain { shift, stretch }: &RectDomain| {
         if shift.len() > stretch.len() * max {
@@ -472,7 +548,7 @@ fn main() -> anyhow::Result<()> {
         }
     };
     let is_good_enough =
-        |RectDomain { shift, stretch }: &RectDomain| shift.len() + stretch.len() * max < 0.005;
+        |RectDomain { shift, stretch }: &RectDomain| shift.len() + stretch.len() * max < 0.001;
     let (res_bound, res_domain) = solver::solve(
         RectDomain {
             shift: Range {
