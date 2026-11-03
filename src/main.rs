@@ -1,6 +1,6 @@
 use std::cmp::{max, min};
 
-use log::{LevelFilter, debug};
+use log::{LevelFilter, debug, warn};
 
 mod decoders;
 mod encoders;
@@ -494,10 +494,23 @@ fn main() -> anyhow::Result<()> {
         input_subtitles
             .0
             .into_iter()
-            .map(|Subtitle { beg, end, text }| Subtitle {
-                beg: (beg - min) * stretch + shift + min,
-                end: (end - min) * stretch + shift + min,
-                text,
+            .filter_map(|Subtitle { beg, end, text }| {
+                let beg = (beg - min) * stretch + shift + min;
+                let end = (end - min) * stretch + shift + min;
+                if end <= 0. {
+                    warn!(
+                        "Dropping subtitles with negative time: {:.3}s -> {:.3}s, text: {}",
+                        beg, end, text
+                    );
+                    None
+                } else {
+                    if beg < 0. {
+                        warn!(
+                        "Clamping subtitles that begin < 0s to start at 0: {:.3}s -> {:.3}s, text: {}", beg, end, text);
+
+                    }
+                    Some(Subtitle { beg: beg.max(0.), end, text })
+                }
             })
             .collect(),
     );
