@@ -1,7 +1,5 @@
 use std::{cmp::Ordering, collections::BinaryHeap};
 
-use log::debug;
-
 struct Candidate<Domain> {
     max_bound: f64,
     domain: Domain,
@@ -32,6 +30,7 @@ pub fn solve<Domain>(
     mut calc_max_bound: impl FnMut(&Domain, Option<f64>) -> f64,
     mut do_split: impl FnMut(&Domain) -> (Domain, Domain),
     mut is_good_enough: impl FnMut(&Domain) -> bool,
+    mut progress: impl FnMut(f64),
 ) -> (f64, Domain) {
     let mut space = BinaryHeap::from([Candidate {
         max_bound: calc_max_bound(&domain, None),
@@ -40,7 +39,7 @@ pub fn solve<Domain>(
 
     loop {
         let Candidate { max_bound, domain } = space.pop().unwrap();
-        debug!("max: {:.3}", max_bound);
+        progress(max_bound);
         if is_good_enough(&domain) {
             return (max_bound, domain);
         }

@@ -1,6 +1,6 @@
 use std::cmp::{max, min};
 
-use log::{LevelFilter, debug, warn};
+use log::{LevelFilter, debug, info, warn};
 
 mod decoders;
 mod encoders;
@@ -408,7 +408,10 @@ fn max_score_in_specialized_double_lcs(
     };
     let min_len = min(from.len(), to.len());
     let mut k = max(
-        min_len - max_score_upper_bound.unwrap_or(min_len as f64).min(min_len as f64) as usize,
+        min_len
+            - max_score_upper_bound
+                .unwrap_or(min_len as f64)
+                .min(min_len as f64) as usize,
         (l + r) / 3,
     ) * 4
         / 3
@@ -424,7 +427,8 @@ fn max_score_in_specialized_double_lcs(
                 let f = &from[non_zero_score_beg];
                 let end = f.end * domain.stretch.end + domain.shift.end;
                 if end <= elem.beg {
-                    dp[non_zero_score_beg + 1] = dp[non_zero_score_beg + 1].max(dp[non_zero_score_beg]);
+                    dp[non_zero_score_beg + 1] =
+                        dp[non_zero_score_beg + 1].max(dp[non_zero_score_beg]);
                     non_zero_score_beg += 1;
                 } else {
                     break;
@@ -435,7 +439,8 @@ fn max_score_in_specialized_double_lcs(
                 let f = &from[non_zero_score_end];
                 let beg = f.beg * domain.stretch.beg + domain.shift.beg;
                 if beg < elem.end {
-                    dp[non_zero_score_end + 1] = dp[non_zero_score_end + 1].max(dp[non_zero_score_end]);
+                    dp[non_zero_score_end + 1] =
+                        dp[non_zero_score_end + 1].max(dp[non_zero_score_end]);
                     non_zero_score_end += 1;
                 } else {
                     break;
@@ -443,7 +448,9 @@ fn max_score_in_specialized_double_lcs(
             }
             let start = j.saturating_sub(l + k);
             let end = min(j + r + k, from.len());
-            if non_zero_score_beg < non_zero_score_end && (start > non_zero_score_beg || end < non_zero_score_end) {
+            if non_zero_score_beg < non_zero_score_end
+                && (start > non_zero_score_beg || end < non_zero_score_end)
+            {
                 explored_more = true;
             }
             let start = start.max(non_zero_score_beg);
@@ -497,15 +504,12 @@ fn main() -> anyhow::Result<()> {
         min = min.min(s.beg.min(s.end));
         max = max.max(s.beg.max(s.end));
     }
-    dbg!(min, max);
     for s in from_ranges.iter_mut().chain(to_ranges.iter_mut()) {
         s.beg -= min;
         s.end -= min;
     }
     max -= min;
-    dbg!(from_ranges.first());
-    dbg!(to_ranges.first());
-    let calc_max_bound = move |domain: &RectDomain, max_score_upper_bound: Option<f64>| {
+    let calc_max_bound = |domain: &RectDomain, max_score_upper_bound: Option<f64>| {
         max_score_in_specialized_double_lcs(domain, &from_ranges, &to_ranges, max_score_upper_bound)
     };
     let do_split = |RectDomain { shift, stretch }: &RectDomain| {
@@ -549,6 +553,16 @@ fn main() -> anyhow::Result<()> {
     };
     let is_good_enough =
         |RectDomain { shift, stretch }: &RectDomain| shift.len() + stretch.len() * max < 0.001;
+
+    let progress_bar = indicatif::ProgressBar::no_length()
+        .with_style(indicatif::ProgressStyle::with_template("{msg}")?);
+    let inv_longer_len = 100. / from_ranges.len().max(to_ranges.len()) as f64;
+    let progress = |max_bound| {
+        progress_bar.set_message(format!(
+            "Optimal match <= {:.3}%",
+            max_bound * inv_longer_len
+        ));
+    };
     let (res_bound, res_domain) = solver::solve(
         RectDomain {
             shift: Range {
@@ -560,11 +574,28 @@ fn main() -> anyhow::Result<()> {
         calc_max_bound,
         do_split,
         is_good_enough,
+        progress,
     );
-    debug!("res {{ bound: {}, domain: {:?} }}", res_bound, res_domain);
     let shift = res_domain.shift.midpoint();
     let stretch = res_domain.stretch.midpoint();
-    debug!("stretch: {:.9}, shift: {:.4}", stretch, shift);
+    progress_bar.finish_with_message(format!(
+        "Optimal match ~ {:.3}%",
+        calc_max_bound(
+            &RectDomain {
+                shift: Range {
+                    beg: shift,
+                    end: shift
+                },
+                stretch: Range {
+                    beg: stretch,
+                    end: stretch
+                }
+            },
+            Some(res_bound)
+        ) * inv_longer_len
+    ));
+    debug!("res {{ bound: {}, domain: {:?} }}", res_bound, res_domain);
+    info!("stretch: {:.9}, shift: {:.4}", stretch, shift);
 
     let out_subtitles = Subtitles(
         input_subtitles
