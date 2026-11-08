@@ -145,45 +145,47 @@ fn max_match_in(domain: &RectDomain, from: &Range, to: &Range) -> f64 {
 }
 
 #[allow(unused)]
-fn max_score_in_general_optimized_double_lcs(
+fn max_score_in_general_optimized_double_lcs<Src, Dest>(
     domain: &RectDomain,
-    from: &[Range],
-    to: &[Range],
+    src: &[Src],
+    dest: &[Dest],
     max_score_upper_bound: Option<f64>,
+    mut calc_max_possible_match_in: impl FnMut(&RectDomain, &Src, &Dest) -> f64,
 ) -> f64 {
-    if from.is_empty() || to.is_empty() {
+    if src.is_empty() || dest.is_empty() {
         return 0.;
     }
-    let (l, r) = if to.len() < from.len() {
-        (0, from.len() - to.len())
+    let (l, r) = if dest.len() < src.len() {
+        (0, src.len() - dest.len())
     } else {
-        (to.len() - from.len(), 0)
+        (dest.len() - src.len(), 0)
     };
-    let min_len = min(from.len(), to.len());
+    let min_len = min(src.len(), dest.len());
     let mut k = max(
         min_len - max_score_upper_bound.unwrap_or(min_len as f64) as usize,
         (l + r) / 3,
     ) * 4
         / 3
         + 2;
-    let mut dp = vec![0_f64; from.len() + 1];
+    let mut dp = vec![0_f64; src.len() + 1];
     loop {
         dp.fill(0.);
-        for (j, elem) in to.iter().enumerate() {
+        for (j, elem) in dest.iter().enumerate() {
             let start = j.saturating_sub(l + k);
-            let end = min(j + r + k, from.len());
+            let end = min(j + r + k, src.len());
             let mut diag = dp[start];
             for i in start..end {
                 let next_diag = dp[i + 1];
                 dp[i + 1] = dp[i + 1].max(dp[i]);
                 if diag + 1.0 > dp[i + 1] {
-                    dp[i + 1] = dp[i + 1].max(diag + max_match_in(domain, &from[i], elem));
+                    dp[i + 1] =
+                        dp[i + 1].max(diag + calc_max_possible_match_in(domain, &src[i], elem));
                 }
 
                 diag = next_diag;
             }
         }
-        let score = dp[from.len()];
+        let score = dp[src.len()];
         if score >= min_len.saturating_sub(k) as f64 {
             return score;
         }
@@ -191,21 +193,29 @@ fn max_score_in_general_optimized_double_lcs(
     }
 }
 
-fn max_score_in_specialized_double_lcs(
+/// Assumption is that for each j:
+///   first(j) <= first(j + 1) and last(j) <= last(j + 1)
+/// Where:
+/// - first(j) = min{i where max_match(a_i, b_j) > 0}
+/// - last(j) = max{i where max_match(a_i, b_j) > 0}
+fn max_score_in_special_optimized_double_lcs<Src, Dest>(
     domain: &RectDomain,
-    from: &[Range],
-    to: &[Range],
+    src: &[Src],
+    dest: &[Dest],
     max_score_upper_bound: Option<f64>,
+    mut calc_max_possible_match_in: impl FnMut(&RectDomain, &Src, &Dest) -> f64,
+    mut this_and_all_prev_src_match_equal_zero: impl FnMut(&RectDomain, &Src, &Dest) -> bool,
+    mut this_and_all_next_src_match_equal_zero: impl FnMut(&RectDomain, &Src, &Dest) -> bool,
 ) -> f64 {
-    if from.is_empty() || to.is_empty() {
+    if src.is_empty() || dest.is_empty() {
         return 0.;
     }
-    let (l, r) = if to.len() < from.len() {
-        (0, from.len() - to.len())
+    let (l, r) = if dest.len() < src.len() {
+        (0, src.len() - dest.len())
     } else {
-        (to.len() - from.len(), 0)
+        (dest.len() - src.len(), 0)
     };
-    let min_len = min(from.len(), to.len());
+    let min_len = min(src.len(), dest.len());
     let mut k = max(
         min_len
             - max_score_upper_bound
@@ -215,38 +225,28 @@ fn max_score_in_specialized_double_lcs(
     ) * 4
         / 3
         + 2;
-    let mut dp = vec![0_f64; from.len() + 1];
+    let mut dp = vec![0_f64; src.len() + 1];
     loop {
         dp.fill(0.);
         let mut non_zero_score_beg = 0;
         let mut non_zero_score_end = 0;
         let mut explored_more = false;
-        for (j, elem) in to.iter().enumerate() {
-            while non_zero_score_beg < from.len() {
-                let f = &from[non_zero_score_beg];
-                let end = f.end * domain.stretch.end + domain.shift.end;
-                if end <= elem.beg {
-                    dp[non_zero_score_beg + 1] =
-                        dp[non_zero_score_beg + 1].max(dp[non_zero_score_beg]);
-                    non_zero_score_beg += 1;
-                } else {
-                    break;
-                }
+        for (j, dest_j) in dest.iter().enumerate() {
+            while non_zero_score_beg < src.len()
+                && this_and_all_prev_src_match_equal_zero(domain, &src[non_zero_score_beg], dest_j)
+            {
+                dp[non_zero_score_beg + 1] = dp[non_zero_score_beg + 1].max(dp[non_zero_score_beg]);
+                non_zero_score_beg += 1;
             }
             non_zero_score_end = non_zero_score_end.max(non_zero_score_beg);
-            while non_zero_score_end < from.len() {
-                let f = &from[non_zero_score_end];
-                let beg = f.beg * domain.stretch.beg + domain.shift.beg;
-                if beg < elem.end {
-                    dp[non_zero_score_end + 1] =
-                        dp[non_zero_score_end + 1].max(dp[non_zero_score_end]);
-                    non_zero_score_end += 1;
-                } else {
-                    break;
-                }
+            while non_zero_score_end < src.len()
+                && !this_and_all_next_src_match_equal_zero(domain, &src[non_zero_score_end], dest_j)
+            {
+                dp[non_zero_score_end + 1] = dp[non_zero_score_end + 1].max(dp[non_zero_score_end]);
+                non_zero_score_end += 1;
             }
             let start = j.saturating_sub(l + k);
-            let end = min(j + r + k, from.len());
+            let end = min(j + r + k, src.len());
             if non_zero_score_beg < non_zero_score_end
                 && (start > non_zero_score_beg || end < non_zero_score_end)
             {
@@ -259,7 +259,8 @@ fn max_score_in_specialized_double_lcs(
                 let next_diag = dp[i + 1];
                 dp[i + 1] = dp[i + 1].max(dp[i]);
                 if diag + 1.0 > dp[i + 1] {
-                    dp[i + 1] = dp[i + 1].max(diag + max_match_in(domain, &from[i], elem));
+                    dp[i + 1] =
+                        dp[i + 1].max(diag + calc_max_possible_match_in(domain, &src[i], dest_j));
                 }
 
                 diag = next_diag;
@@ -309,7 +310,15 @@ fn main() -> anyhow::Result<()> {
     }
     max -= min;
     let calc_max_bound = |domain: &RectDomain, max_score_upper_bound: Option<f64>| {
-        max_score_in_specialized_double_lcs(domain, &from_ranges, &to_ranges, max_score_upper_bound)
+        max_score_in_special_optimized_double_lcs(
+            domain,
+            &from_ranges,
+            &to_ranges,
+            max_score_upper_bound,
+            max_match_in,
+            |domain, from, to| from.end * domain.stretch.end + domain.shift.end <= to.beg,
+            |domain, from, to| to.end <= from.beg * domain.stretch.beg + domain.shift.beg,
+        )
     };
     let do_split = |RectDomain { shift, stretch }: &RectDomain| {
         if shift.len() > stretch.len() * max {
