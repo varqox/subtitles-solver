@@ -9,6 +9,13 @@ mod solver;
 #[derive(Debug)]
 struct Subtitles(Vec<Subtitle>);
 
+impl Subtitles {
+    fn sorted(mut self) -> Self {
+        self.0.sort_by(|a, b| a.beg.total_cmp(&b.beg));
+        self
+    }
+}
+
 #[derive(Debug)]
 struct Subtitle {
     beg: f64,
@@ -271,8 +278,8 @@ fn main() -> anyhow::Result<()> {
     init_logging(args.debug);
 
     let cli::Commands::Sync { to, input, out } = args.command;
-    let to_subtitles = decoders::decode_subtitles_file(to)?;
-    let input_subtitles = decoders::decode_subtitles_file(input)?;
+    let to_subtitles = decoders::decode_subtitles_file(to)?.sorted();
+    let input_subtitles = decoders::decode_subtitles_file(input)?.sorted();
     let mut from_ranges: Vec<_> = input_subtitles
         .0
         .iter()
